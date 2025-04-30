@@ -24,8 +24,7 @@ export class AnalyzeCommand {
     @Hears('🔍 Analyze Token')
     async analyze(@Ctx() ctx: Context) {
         await ctx.reply(
-            'Send me a token contract address:',
-            removeMenu()
+            'Send me a token contract address:'
         );
     }
 

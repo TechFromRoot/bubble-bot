@@ -10,6 +10,8 @@ import telegramConfig from 'src/config/telegram.config';
 import { TelegramUpdate } from './telegram.update';
 import { HttpModule } from '@nestjs/axios';
 import { TokenAnalysisService } from './providers/token-analysis.service';
+import { ChainsCommand } from './commands/chain.command';
+import { DemoCommand } from './commands/demo.command';
 
 @Module({
     imports: [
@@ -29,9 +31,11 @@ import { TokenAnalysisService } from './providers/token-analysis.service';
         CallbackRouterService,
         HelpCommand,
         StartCommand,
-        AnalyzeCommand,
+        ChainsCommand,
+        DemoCommand,
         TelegramService,
         TokenAnalysisService,
+        AnalyzeCommand,
     ],
 })
 export class TelegramModule { }

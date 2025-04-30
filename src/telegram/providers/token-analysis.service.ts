@@ -70,10 +70,12 @@ export class TokenAnalysisService {
         return price.toFixed(8);
     }
 
-    private async fetchTokenData(mint: string): Promise<TokenData | null> {
+    private async fetchTokenData(mint: string, chain: string): Promise<TokenData | null> {
         try {
-            const [reportResult] = await Promise.allSettled([
+            const [reportResult, bubbleResult, decentralizationData] = await Promise.allSettled([
                 firstValueFrom(this.httpService.get(`https://api.rugcheck.xyz/v1/tokens/${mint}/report`)),
+                firstValueFrom(this.httpService.get(`https://api-legacy.bubblemaps.io/map-data?token=${mint}&chain=${chain}`)),
+                firstValueFrom(this.httpService.get(`https://api-legacy.bubblemaps.io/map-metadata?token=${mint}&chain=${chain}`)),
             ]);
 
             const reportData =
@@ -81,7 +83,33 @@ export class TokenAnalysisService {
                     ? reportResult.value.data
                     : null;
 
-            return reportData;
+            const bubbleData =
+                bubbleResult.status === 'rejected'
+                    ? null
+                    : bubbleResult.value.data;
+
+            const decentralizationScore =
+                (decentralizationData as any).value.data.status === 'KO'
+                    ? null
+                    : (decentralizationData as any).value.data;
+
+
+            const response = reportData ? reportData : {
+                tokenMeta: { name: '', symbol: '' }
+            };
+            if (bubbleData !== null) {
+                response.chain = bubbleData.chain;
+                response.tokenMeta.name = bubbleData.full_name;
+                response.tokenMeta.symbol = bubbleData.symbol;
+                response.mint = bubbleData.token_address;
+                response.holdersMetaData = bubbleData.metadata;
+                response.topHolders = bubbleData.nodes;
+            }
+            if (decentralizationScore !== null) {
+                response.decentralizationData = decentralizationScore;
+            }
+
+            return response;
         } catch (error) {
             console.error('Error fetching token data:', error);
             return null;
@@ -101,8 +129,8 @@ export class TokenAnalysisService {
         return votesData;
     };
 
-    public async getTokenDetails(mint: string) {
-        const token = await this.fetchTokenData(mint);
+    public async getTokenDetails(mint: string, chain: string) {
+        const token = await this.fetchTokenData(mint, chain);
         const tokenVote = await this.fetchVoteData(mint);
 
         if (!token) return null;
@@ -110,28 +138,29 @@ export class TokenAnalysisService {
         const lines: string[] = [];
 
         // Title
-        lines.push(`*${token.tokenMeta.name} (${token.tokenMeta.symbol})*`);
+        lines.push(`*${token.tokenMeta.name} (${token.tokenMeta.symbol})*`.toLocaleUpperCase());
 
         // Description
-        lines.push(`*Mint:* \`${token.mint}\``);
+        lines.push(`*Address:* \`${token.mint}\``);
+        lines.push(`*Chain:* \`${(token as any).chain}\``);
 
         // Token Overview
         const overviewFields: string[] = [];
-        if (token.token.supply) {
-            overviewFields.push(
-                `*Supply:* ${this.formatNumber(token.token.supply / 10 ** token.token.decimals)}`,
-            );
-        }
         if (token.creator) {
             overviewFields.push(`*Creator:* \`${token.creator}\``);
         }
+        if (token.token && token.token.supply && token.token.decimals !== undefined) {
+            overviewFields.push(
+                `*Supply:* ${this.formatNumber(token.token.supply / 10 ** token.token.decimals)}`
+            );
+        }
+        
+        if (token.price && token.token && token.token.supply && token.token.decimals !== undefined) {
+            const marketCap = token.price * (token.token.supply / 10 ** token.token.decimals);
+            overviewFields.push(`*Market Cap:* $${this.formatNumber(marketCap)}`);
+        }
         if (token.price) {
             overviewFields.push(`*Price:* $${this.formatPrice(token.price)}`);
-        }
-        if (token.price && token.token.supply) {
-            overviewFields.push(
-                `*Market Cap:* $${this.formatNumber(token.price * (token.token.supply / 10 ** token.token.decimals))}`,
-            );
         }
         if (token.totalHolders) {
             overviewFields.push(`*Holders:* ${token.totalHolders}`);
@@ -145,8 +174,25 @@ export class TokenAnalysisService {
             overviewFields.push(`*Rugged:* ${token.rugged ? 'Yes' : 'No'}`);
         }
         if (overviewFields.length > 0) {
-            lines.push(`\n*Token Overview*`);
+            lines.push(`\n*TOKEN OVERVIEW*`);
             lines.push(overviewFields.join('\n'));
+        }
+
+        const decentralizationFields: string[] = [];
+        if ((token as any).decentralizationData) {
+            decentralizationFields.push(
+                `*Decentralization Score:* ${(token as any).decentralizationData.decentralisation_score}`,
+            );
+            decentralizationFields.push(
+                `*Percentage in Centralized Exchanges (CEXs):* ${(token as any).decentralizationData.identified_supply.percent_in_cexs}`,
+            );
+            decentralizationFields.push(
+                `*Percentage in Smart Contract:* ${(token as any).decentralizationData.identified_supply.percent_in_contracts}`,
+            );
+        }
+        if (decentralizationFields.length > 0) {
+            lines.push(`\n*Decentralization Overview*`);
+            lines.push(decentralizationFields.join('\n'));
         }
 
         // Risk Analysis
@@ -180,7 +226,7 @@ export class TokenAnalysisService {
             if (token.risks?.length) {
                 riskFields.push('*Risks Detected:*');
                 const risksText = token.risks
-                    .map((r) => `- ${r.name}: ${r.description} (${r.level})`)
+                    .map((r) => `--> ${r.name}: ${r.description} (${r.level})`)
                     .join('\n');
                 riskFields.push(
                     risksText.length > 900
@@ -188,22 +234,25 @@ export class TokenAnalysisService {
                         : risksText,
                 );
             }
-            lines.push(`\n*Risk Analysis*`);
+            lines.push(`\n*RISK ANALYSIS*`);
             lines.push(riskFields.join('\n'));
         }
 
         // Holder Concentration
         if (token.topHolders?.length) {
+            const decimals = token.token?.decimals || 6;
             const topHoldersText = token.topHolders
-                .slice(0, 3)
+                .slice(0, 5)
                 .map((h) => {
-                    const amount = this.formatNumber(h.amount / 10 ** token.token.decimals);
+                    const amount = this.formatNumber(h.amount / 10 ** (decimals));
                     const insiderTag = h.insider ? ' (Insider)' : '';
-                    return `- \`${this.shortenAddress(h.owner)}\`: ${amount} (${h.pct.toFixed(2)}%)${insiderTag}`;
+                    return `- \`${this.shortenAddress((h as any).address)}\`: ${amount} (${((h as any).percentage || h.pct).toFixed(2)}%)${insiderTag}`;
                 })
                 .join('\n');
-            lines.push(`\n*Holder Concentration*`);
-            lines.push(`*Top 3 Holders:*`);
+            lines.push(`\n*HOLDER CONCENTRATION*`);
+            lines.push(`*Max Amount:* ${(token as any).holdersMetaData.max_amount}`);
+            lines.push(`*Min Amount:* ${(token as any).holdersMetaData.min_amount}`);
+            lines.push(`*Top 5 Holders:*`);
             lines.push(topHoldersText);
         }
 
@@ -221,7 +270,7 @@ export class TokenAnalysisService {
                 { insiderPct: 0, totalWallet: 0 },
             );
             const insiderText = `${insiderPct.toFixed(2)}% of supply sent to ${totalWallet} wallets`;
-            lines.push(`\n*Insider Analysis*`);
+            lines.push(`\n*INSIDER ANALYSIS*`);
             lines.push(insiderText);
         }
         if (token.graphInsidersDetected !== undefined) {
@@ -247,7 +296,7 @@ export class TokenAnalysisService {
                     `*Links:* ${token.verification.links.join(', ')}`,
                 );
             }
-            lines.push(`\n*Verification*`);
+            lines.push(`\n*VERIFICATION*`);
             lines.push(verificationFields.join('\n'));
         }
 
@@ -264,13 +313,13 @@ export class TokenAnalysisService {
             );
         }
         if (authorityFields.length > 0) {
-            lines.push(`\n*Authorities*`);
+            lines.push(`\n*AUTHORITIES*`);
             lines.push(authorityFields.join('\n'));
         }
 
         // Community Sentiment
         if (tokenVote) {
-            lines.push(`\n*Community Sentiment*`);
+            lines.push(`\n*COMMUNITY SENTIMENT*`);
             lines.push(`Upvote - ${tokenVote.up} 🚀`);
             lines.push(`Downvote - ${tokenVote.down} 💩`);
         }

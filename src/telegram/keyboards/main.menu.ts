@@ -5,7 +5,10 @@ export function getMainMenu() {
     return Markup.inlineKeyboard([
         [
             { text: '🔍 Analyze Token', callback_data: 'analyze' },
-            { text: 'ℹ️ Help', callback_data: 'help' }
+        ],
+        [
+            { text: '🌐 Supported Chains', callback_data: 'chains' },
+            { text: '📊 Demo Analysis', callback_data: 'demo' }
         ]
     ]);
 }

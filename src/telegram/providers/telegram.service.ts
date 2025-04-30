@@ -16,24 +16,16 @@ export class TelegramService {
         private readonly tokenAnalysisService: TokenAnalysisService
     ) { }
 
-    async showMainMenu(chatId: number) {
-        await this.bot.telegram.sendMessage(
-            chatId,
-            'Choose an option:',
-            getMainMenu()
-        );
-    }
-
     async analyzeToken(chatId: number, contractAddress: string, chain: SupportedChain) {
         try {
             // Step 2: Generate screenshot
-            const screenshotBuffer = await this.generateBubbleMapScreenshot(contractAddress, chain);
 
             // Step 3: Fetch token data (replace with actual API calls)
-            const tokenData = await this.tokenAnalysisService.getTokenDetails(contractAddress);
+            const tokenData = await this.tokenAnalysisService.getTokenDetails(contractAddress, chain);
+            const screenshotBuffer = await this.generateBubbleMapScreenshot(contractAddress, chain);
 
             // Step 4: Format caption
-            const caption = tokenData.message;
+            const caption = tokenData?.message || "No data available";
 
             // Step 5: Send results
             await this.bot.telegram.sendPhoto(
@@ -44,17 +36,20 @@ export class TelegramService {
             await this.bot.telegram.sendMessage(
                 chatId,
                 caption,
-                getTokenMenu(tokenData.keyboard)
+                {
+                    parse_mode: 'Markdown',
+                    reply_markup: getTokenMenu(tokenData.keyboard).reply_markup
+                }
             );
 
         } catch (error) {
             console.error('Analysis failed:', error);
             await this.bot.telegram.sendMessage(
                 chatId,
-                `❌ Failed to analyze token:\n${error.message}\n\n` +
+                `❌ Failed to analyze token:\n\n` +
                 'Please ensure:\n' +
                 '1. Correct contract address\n' +
-                '2. Supported chain (ETH, BSC, etc.)'
+                '2. Supported chain'
             );
         }
     }
@@ -109,9 +104,5 @@ export class TelegramService {
         } finally {
             await browser.close();
         }
-    }
-
-    private formatNumber(num: number): string {
-        return new Intl.NumberFormat('en-US').format(num);
     }
 }
