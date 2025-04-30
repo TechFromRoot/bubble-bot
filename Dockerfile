@@ -6,9 +6,9 @@ ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true \
 WORKDIR /usr/src/app
 
 COPY package*.json ./
-RUN npm ci
+RUN pnpm ci
 COPY . .
 
-RUN npm run build
+RUN pnpm run build
 # Start the server using the production build
-CMD ["npm", "run", "start:prod"]
+CMD ["pnpm", "run", "start:prod"]
