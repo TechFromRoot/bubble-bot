@@ -5,10 +5,20 @@ ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true \
 
 WORKDIR /usr/src/app
 
-COPY package*.json ./
-RUN pnpm ci
+# Install pnpm globally
+RUN npm install -g pnpm
+
+# Copy lockfile and manifest to leverage Docker cache
+COPY pnpm-lock.yaml* package.json ./
+
+# Install dependencies
+RUN pnpm install --frozen-lockfile
+
+# Copy the rest of the application
 COPY . .
 
+# Build the app
 RUN pnpm run build
+
 # Start the server using the production build
 CMD ["pnpm", "run", "start:prod"]
